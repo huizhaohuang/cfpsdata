@@ -1,0 +1,467 @@
+---
+title: "cfps_explore"
+output: html_document
+date: "2026-01-01"
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+library(writexl)
+library(showtext)
+library(sf)
+library(geodata)
+library(mapchina)
+```
+
+```{r}
+pop_all_raw <- read_excel("data/pop_all_raw.xlsx")
+pop_age_sum <- pop_all_raw %>%
+  transmute(
+    `地区`, 
+    `0岁`        = `男_0岁` + `女_0岁`,
+    `1到4岁`     = `男_1到4岁` + `女_1到4岁`,
+    `5到9岁`     = `男_5到9岁` + `女_5到9岁`,
+    `10到14岁`   = `男_10到14岁` + `女_10到14岁`,
+    `15到19岁`   = `男_15到19岁` + `女_15到19岁`,
+    `20到24岁`   = `男_20到24岁` + `女_20到24岁`,
+    `25到29岁`   = `男_25到29岁` + `女_25到29岁`,
+    `30到34岁`   = `男_30到34岁` + `女_30到34岁`,
+    `35到39岁`   = `男_35到39岁` + `女_35到39岁`,
+    `40到44岁`   = `男_40到44岁` + `女_40到44岁`,
+    `45到49岁`   = `男_45到49岁` + `女_45到49岁`,
+    `50到54岁`   = `男_50到54岁` + `女_50到54岁`,
+    `55到59岁`   = `男_55到59岁` + `女_55到59岁`,
+    `60到64岁`   = `男_60到64岁` + `女_60到64岁`,
+    `65到69岁`   = `男_65到69岁` + `女_65到69岁`,
+    `70到74岁`   = `男_70到74岁` + `女_70到74岁`,
+    `75到79岁`   = `男_75到79岁` + `女_75到79岁`,
+    `80到84岁`   = `男_80到84岁` + `女_80到84岁`,
+    `85岁以上`   = `男_85岁以上` + `女_85岁以上`
+  )
+```
+
+
+```{r}
+beijing_aging <- pop_age_sum %>%
+  mutate(
+    elderly_65plus = 
+      `65到69岁` +
+      `70到74岁` +
+      `75到79岁` +
+      `80到84岁` +
+      `85岁以上`,
+
+    total_population = 
+      rowSums(across(-`地区`), na.rm = TRUE),
+
+    `elderly_share(%)` = round(elderly_65plus / total_population * 100, 2)
+  ) %>%
+  select(`地区`, elderly_65plus, total_population, `elderly_share(%)`) %>%
+  slice_head(n = 19) 
+  
+```
+
+```{r}
+province_list <- c(
+  "北京市", "天津市", "河北省", "山西省", "内蒙古自治区",
+  "辽宁省", "吉林省", "黑龙江省",
+  "上海市", "江苏省", "浙江省", "安徽省", "福建省", "江西省", "山东省",
+  "河南省", "湖北省", "湖南省",
+  "广东省", "广西壮族自治区", "海南省",
+  "重庆市", "四川省", "贵州省", "云南省", "西藏自治区",
+  "陕西省", "甘肃省", "青海省", "宁夏回族自治区", "新疆维吾尔自治区"
+)
+pop_province <- pop_age_sum %>%
+  filter(`地区` %in% province_list)
+
+pop_province_clean <- pop_province %>%
+  mutate(
+    `0到4岁` = `0岁` + `1到4岁`
+  )
+
+labor_projection <- pop_province_clean %>%
+  mutate(
+    # 2020：当前劳动年龄人口
+    labor_2020 =
+      `15到19岁` +
+      `20到24岁` +
+      `25到29岁` +
+      `30到34岁` +
+      `35到39岁` +
+      `40到44岁` +
+      `45到49岁`,
+
+    # 2025：窗口前移 5 年 → 10–44
+    labor_2025 =
+      `10到14岁` +
+      `15到19岁` +
+      `20到24岁` +
+      `25到29岁` +
+      `30到34岁` +
+      `35到39岁` +
+      `40到44岁`,
+
+    # 2030：窗口前移 10 年 → 5–39
+    labor_2030 =
+      `5到9岁` +
+      `10到14岁` +
+      `15到19岁` +
+      `20到24岁` +
+      `25到29岁` +
+      `30到34岁` +
+      `35到39岁`,
+
+    # 2035：窗口前移 15 年 → 0–34
+    labor_2035 =
+      `0到4岁` +
+      `5到9岁` +
+      `10到14岁` +
+      `15到19岁` +
+      `20到24岁` +
+      `25到29岁` +
+      `30到34岁`
+  ) %>%
+  select(`地区`, labor_2020, labor_2025, labor_2030, labor_2035)
+
+```
+
+```{r}
+
+labor_projection <- labor_projection %>%
+  mutate(
+    change_20_25 = labor_2025 - labor_2020,
+    change_20_30 = labor_2030 - labor_2020,
+    change_20_35 = labor_2035 - labor_2020
+  )
+
+labor_projection <- labor_projection %>%
+  mutate(
+    pct_20_25 = change_20_25 / labor_2020 * 100,
+    pct_20_30 = change_20_30 / labor_2020 * 100,
+    pct_20_35 = change_20_35 / labor_2020 * 100
+  )
+
+```
+
+
+
+```{r}
+showtext_auto()
+labor_projection %>%
+  arrange(pct_20_35) %>%
+  mutate(
+    `地区` = factor(`地区`, levels = `地区`)
+  ) %>%
+  ggplot(aes(x = pct_20_35, y = `地区`)) +
+  geom_col(fill = "#b2182b") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey40") +
+  scale_x_continuous(
+    labels = function(x) paste0(x, "%")
+  ) +
+  labs(
+    title = "2020–2035年各省劳动年龄人口（15–49岁）变化率",
+    subtitle = "基于第七次人口普查的静态队列前移估算",
+    x = "变化率",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 10)
+
+```
+```{r}
+
+pop_0_19_single_age <- pop_province %>%
+  select(
+    `地区`,
+    `0岁`,
+    `1到4岁`,
+    `5到9岁`,
+    `10到14岁`,
+    `15到19岁`
+  ) %>%
+  
+  pivot_longer(
+    cols = c(`0岁`, `1到4岁`, `5到9岁`, `10到14岁`, `15到19岁`),
+    names_to = "age_group",
+    values_to = "population"
+  ) %>%
+
+  mutate(
+    population = as.numeric(population)
+  ) %>%
+  
+  mutate(
+    age = case_when(
+      age_group == "0岁"        ~ list(0),
+      age_group == "1到4岁"     ~ list(1:4),
+      age_group == "5到9岁"     ~ list(5:9),
+      age_group == "10到14岁"   ~ list(10:14),
+      age_group == "15到19岁"   ~ list(15:19)
+    ),
+    n_ages = map_int(age, length),
+    population = population / n_ages
+  ) %>%
+  
+  unnest(age) %>%
+
+  select(`地区`, age, population)
+```
+
+```{r}
+school_age_projection <- pop_0_19_single_age %>%
+  # 只保留可能用到的年龄
+  filter(age >= 0, age <= 18) %>%
+  
+  # 构造“预测年份”
+  crossing(
+    year = 2020:2026
+  ) %>%
+  
+  # 计算在该年份下，哪些年龄属于学龄段
+  mutate(
+    age_in_2020 = age + (year - 2020)
+  ) %>%
+  
+  # 学龄人口条件：6–18 岁
+  filter(
+    age_in_2020 >= 6,
+    age_in_2020 <= 18
+  ) %>%
+  
+  # 按省份 + 年份汇总
+  group_by(`地区`, year) %>%
+  summarise(
+    school_age_population = sum(population),
+    .groups = "drop"
+  )
+
+school_age_change <- school_age_projection %>%
+  arrange(`地区`, year) %>%
+  group_by(`地区`) %>%
+  mutate(
+    change = school_age_population - lag(school_age_population)
+  ) %>%
+  ungroup()
+
+focus_provinces <- c(
+  "北京市", "河南省", "山东省", "四川省", "江苏省",
+  "河北省", "黑龙江省", "江西省", "湖南省", "广东省"
+)
+
+school_age_change_focus <- school_age_change %>%
+  filter(
+    `地区` %in% focus_provinces,
+    year >= 2024,
+    year <= 2026
+  )
+
+highlight_provinces <- c("河南省", "山东省", "江苏省")
+
+province_colors <- c(
+  "#a6cee3",
+  "#1f78b4",
+  "#b2df8a",
+  "#33a02c",
+  "#fb9a99",
+  "#e31a1c",
+  "#fdbf6f",
+  "#ff7f00",
+  "#cab2d6",
+  "#6a3d9a"
+)
+
+province_levels <- unique(school_age_change_focus$`地区`)
+
+color_map <- setNames(
+  province_colors[seq_along(province_levels)],
+  province_levels
+)
+
+ggplot(
+  school_age_change_focus,
+  aes(
+    x = year,
+    y = change,
+    group = `地区`,
+    color = `地区`
+  )
+) +
+  geom_line(
+    aes(
+      size  = `地区` %in% highlight_provinces,
+      alpha = `地区` %in% highlight_provinces
+    )
+  ) +
+  geom_point(
+    aes(
+      size  = `地区` %in% highlight_provinces,
+      alpha = `地区` %in% highlight_provinces
+    )
+  ) +
+  scale_color_manual(values = color_map) +
+  scale_size_manual(
+    values = c(`TRUE` = 1.5, `FALSE` = 1.5),
+    guide = "none"
+  ) +
+  scale_alpha_manual(
+    values = c(`TRUE` = 0.9, `FALSE` = 0.35),
+    guide = "none"
+  ) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed",
+    color = "grey40"
+  ) +
+  scale_x_continuous(breaks = 2024:2026) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    title = "2024–2026年部分省份学龄人口年度变化规模",
+    subtitle = "基于七普人口数据，学龄人口设为6-18岁人口",
+    x = "年份",
+    y = "学龄人口年度变化（人）",
+    color = NULL
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+```{r}
+province <- china %>%
+  filter(Name_Province %in% c("河南省"))
+
+cities <- province %>%
+  group_by(Name_Perfecture) %>%
+  summarise(geometry = st_union(geometry))
+
+countries <- province %>%
+  group_by(Name_County) %>%
+  summarise(geometry = st_union(geometry))
+
+ggplot() +
+  geom_sf(data = countries,
+          aes(fill = factor(generate_map_colors(countries))),
+          linetype = "solid", size = 0.5) +
+  scale_fill_brewer(palette = "Pastel1") +
+  geom_sf(data = province, alpha = 0, linetype = "dashed", size = 0.2) +
+  geom_sf(data = cities, alpha = 0, linetype = "solid", size = 1.2) +
+  geom_sf_label(data = countries, aes(label = Name_County), size = 2.3) +
+  theme_bw() +
+  theme(legend.position = "none")
+```
+```{r}
+henan_pop <- pop_age_sum %>%
+  slice(1585:1784)
+
+henan_single_age <- henan_pop %>%
+  select(
+    `地区`,
+    `0岁`,
+    `1到4岁`,
+    `5到9岁`,
+    `10到14岁`,
+    `15到19岁`
+  ) %>%
+  pivot_longer(
+    cols = -`地区`,
+    names_to = "age_group",
+    values_to = "population"
+  ) %>%
+  mutate(
+    population = as.numeric(population),
+    age = case_when(
+      age_group == "0岁"        ~ list(0),
+      age_group == "1到4岁"     ~ list(1:4),
+      age_group == "5到9岁"     ~ list(5:9),
+      age_group == "10到14岁"   ~ list(10:14),
+      age_group == "15到19岁"   ~ list(15:19)
+    ),
+    n_age = map_int(age, length),
+    population = population / n_age
+  ) %>%
+  unnest(age) %>%
+  select(`地区`, age, population)
+
+henan_primary_projection <- henan_single_age %>%
+  crossing(year = 2020:2027) %>%
+  mutate(
+    age_in_year = age + (year - 2020)
+  ) %>%
+  filter(
+    age_in_year >= 6,
+    age_in_year <= 12
+  ) %>%
+  group_by(`地区`, year) %>%
+  summarise(
+    primary_school_population = sum(population),
+    .groups = "drop"
+  )
+
+henan_primary_23_27 <- henan_primary_projection %>%
+  filter(year %in% c(2023, 2027)) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = primary_school_population
+  ) %>%
+  mutate(
+    pct_change_23_27 = (`2027` - `2023`) / `2023` * 100
+  )
+
+```
+
+
+```{r}
+countries_clean <- countries %>%
+  mutate(
+    county_clean = str_remove(Name_County, "(区|市|县)$")
+  )
+
+henan_primary_23_27_clean <- henan_primary_23_27 %>%
+  mutate(
+    county_clean = str_remove(`地区`, "(区|市|县)$")
+  )
+
+henan_map_pct <- countries_clean %>%
+  left_join(
+    henan_primary_23_27_clean,
+    by = "county_clean"
+  )
+
+henan_map_pct <- henan_map_pct %>%
+  mutate(
+    change_group = cut(
+      pct_change_23_27,
+      breaks = c(-Inf, -40, -30, -20, -10, Inf),
+      labels = c(
+        "下降 ≥40%",
+        "下降 30–40%",
+        "下降 20–30%",
+        "下降 10–20%",
+        "下降 <10%"
+      )
+    )
+  )
+
+ggplot() +
+  geom_sf(
+    data = henan_map_pct,
+    aes(fill = change_group),
+    color = "grey65",
+    size = 0.15
+  ) +
+  scale_fill_manual(
+    values = c(
+      "下降 ≥40%"   = "#08306b",
+      "下降 30–40%" = "#2171b5",
+      "下降 20–30%" = "#6baed6",
+      "下降 10–20%" = "#c6dbef",
+      "下降 <10%"   = "#eff3ff"
+    ),
+    name = "2023–2027河南省\n小学学龄人口(6-18岁)变化"
+  ) +
+  geom_sf(data = cities, fill = NA, color = "grey30", size = 0.3) +
+  geom_sf(data = province, fill = NA, color = "black", size = 0.5) +
+  theme_void()
+
+```
